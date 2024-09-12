@@ -1,5 +1,5 @@
 provider "aws" {
-  region = "us-west-2"
+  region = var.region
 }
 
 # VPC
@@ -103,8 +103,25 @@ resource "aws_route_table_association" "private" {
   route_table_id = element(aws_route_table.private.*.id, count.index)
 }
 
+# Security Group for EKS Nodes
+resource "aws_security_group" "eks_node_group_sg" {
+  vpc_id = aws_vpc.main.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "eks-node-group-sg"
+  }
+}
+
+# EKS Cluster
 resource "aws_eks_cluster" "eks" {
-  name     = "eks-cluster"
+  name     =var.cluster_name
   role_arn = aws_iam_role.eks_cluster_role.arn
 
   vpc_config {
@@ -117,6 +134,7 @@ resource "aws_eks_cluster" "eks" {
   ]
 }
 
+# EKS Node Group
 resource "aws_eks_node_group" "node_group" {
   cluster_name    = aws_eks_cluster.eks.name
   node_group_name = "eks-node-group"
@@ -124,12 +142,12 @@ resource "aws_eks_node_group" "node_group" {
   subnet_ids      = aws_subnet.private.*.id
 
   scaling_config {
-    desired_size = 2
-    max_size     = 3
-    min_size     = 1
+    desired_size = var.autscale_params.desired_size
+    max_size     = var.autscale_params.max_size
+    min_size     = var.autscale_params.min_size
   }
 
-  instance_types = ["t3.medium"]
+  instance_types = var.instance_type
 
   depends_on = [
     aws_eks_cluster.eks,
@@ -139,56 +157,42 @@ resource "aws_eks_node_group" "node_group" {
   ]
 }
 
-resource "aws_security_group" "eks_node_group_sg" {
-  vpc_id = aws_vpc.main.id
-
-  ingress {
-    from_port   = 0
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 65535
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_lb" "external" {
-  name                   = "external-load-balancer"
-  internal               = false
-  load_balancer_type     = "application"
-  security_groups        = [aws_security_group.eks_node_group_sg.id]
-  subnets                = aws_subnet.public.*.id
+# Load Balancer
+resource "aws_lb" "eks_lb" {
+  name                      = "eks-load-balancer"
+  internal                  = false
+  load_balancer_type        = "application"
+  security_groups           = [aws_security_group.eks_node_group_sg.id]
+  subnets                   = aws_subnet.public.*.id
   enable_deletion_protection = false
-}
 
-resource "aws_lb_target_group" "external" {
-  name     = "external-target-group"
-  port     = 80
-  protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
-
-  health_check {
-    path                = "/"
-    interval            = 30
-    timeout             = 5
-    healthy_threshold   = 5
-    unhealthy_threshold = 2
-    matcher             = "200"
+  tags = {
+    Name = "eks-load-balancer"
   }
 }
 
-resource "aws_lb_listener" "external" {
-  load_balancer_arn = aws_lb.external.arn
-  port              = 80
-  protocol          = "HTTP"
+resource "aws_acm_certificate" "example" {
+  domain_name       = "migdal.co.il"
+  validation_method = "DNS"
+
+  tags = {
+    Name = "example-cert"
+  }
+}
+
+resource "aws_lb_listener" "lb_list" {
+  load_balancer_arn = aws_lb.eks_lb.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = aws_acm_certificate.example.arn
 
   default_action {
     type             = "forward"
-    target_group_arn = aws_lb_target_group.external.arn
+    target_group_arn = aws_lb_target_group.eks_lb.arn
+  }
+
+  tags = {
+    Name = "elb-listener"
   }
 }

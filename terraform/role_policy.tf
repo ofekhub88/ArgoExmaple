@@ -1,3 +1,4 @@
+#Create the IAM roles and attach the to eks cluster and node group
 resource "aws_iam_role" "eks_cluster_role" {
   name = "eks-cluster-role"
 
@@ -14,7 +15,7 @@ resource "aws_iam_role" "eks_cluster_role" {
     ]
   })
 }
-
+# AmazonEKSClusterPolicy policy includes 
 resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role      = aws_iam_role.eks_cluster_role.name
@@ -24,7 +25,12 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSServicePolicy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSServicePolicy"
   role      = aws_iam_role.eks_cluster_role.name
 }
+resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonRoute53FullAccess" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonRoute53FullAccess"
+  role       = aws_iam_role.eks_cluster_role.name
+}
 
+# This role is used to manage the EKS node group
 resource "aws_iam_role" "eks_node_role" {
   name = "eks-node-role"
 
